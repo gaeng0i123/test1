@@ -13,6 +13,8 @@ SHEET_HOMEWORK = "숙제_주간계획"
 SHEET_CHILDREN = "자녀목록"
 SHEET_SETTINGS = "설정"
 SHEET_HOLIDAYS = "휴일"
+SHEET_REMINDER_TIMES = "알림시간"
+SHEET_WORKBOOK = "문제집_진도"
 
 # 요일 매핑 (한글 → 숫자)
 DAY_MAP = {"월": 0, "화": 1, "수": 2, "목": 3, "금": 4, "토": 5, "일": 6}

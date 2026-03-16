@@ -1,9 +1,12 @@
+from __future__ import annotations
+
 from datetime import date
+from typing import Dict, List, Optional
 
 from config import DAY_NAMES
 
 
-def build_morning_summary(child_name: str, today: date, academies: list[dict], homework: list[dict]) -> str | None:
+def build_morning_summary(child_name: str, today: date, academies: List[Dict], homework: List[Dict]) -> Optional[str]:
     """매일 아침 요약 메시지 생성. 학원+숙제 모두 없으면 None 반환."""
     if not academies and not homework:
         return None
@@ -34,12 +37,13 @@ def build_academy_reminder(child_name: str, academy: dict, minutes_before: int) 
     """학원 출발 전 알림 메시지."""
     memo = f"\n📌 {academy['메모']}" if academy["메모"] else ""
     return (
-        f"⏰ {child_name}아, {minutes_before}분 후 {academy['학원명']} 출발!{memo}\n"
+        f"🏫 {academy['학원명']} 출발해!\n\n"
+        f"⏰ {child_name}아, {minutes_before}분 후 출발!{memo}\n"
         f"준비하자! 🏃"
     )
 
 
-def build_homework_reminder(child_name: str, homework: list[dict]) -> str | None:
+def build_homework_reminder(child_name: str, homework: List[Dict]) -> Optional[str]:
     """저녁 숙제 알림 메시지. 남은 숙제가 없으면 None 반환."""
     if not homework:
         return None
@@ -59,7 +63,7 @@ def build_done_response(child_name: str, subject: str) -> str:
     return f"✅ {subject} 숙제 완료! {child_name}아 잘했어 👍"
 
 
-def build_weekly_report(child_name: str, week_label: str, total: int, done: int, incomplete: list[str]) -> str:
+def build_weekly_report(child_name: str, week_label: str, total: int, done: int, incomplete: List[str]) -> str:
     """주간 리포트 (자녀 1명분)."""
     pct = int(done / total * 100) if total > 0 else 0
     lines = [f"👤 {child_name}"]
@@ -69,7 +73,7 @@ def build_weekly_report(child_name: str, week_label: str, total: int, done: int,
     return "\n".join(lines)
 
 
-def build_full_weekly_report(week_label: str, child_reports: list[str]) -> str:
+def build_full_weekly_report(week_label: str, child_reports: List[str]) -> str:
     """전체 주간 리포트."""
     lines = [f"📊 이번 주 숙제 리포트 ({week_label})", ""]
     lines.extend(child_reports)

@@ -1,10 +1,33 @@
+from __future__ import annotations
+
 import logging
 from datetime import date, datetime
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+# 지원하는 날짜 형식들
+_DATE_FORMATS = ["%Y-%m-%d", "%m/%d", "%m-%d", "%Y/%m/%d"]
 
-def is_holiday(target_date: date, holiday_data: list[dict]) -> bool:
+
+def _parse_date(date_str: str, year: Optional[int] = None) -> Optional[date]:
+    """여러 형식의 날짜 문자열을 date로 변환."""
+    date_str = date_str.strip()
+    if year is None:
+        year = date.today().year
+    for fmt in _DATE_FORMATS:
+        try:
+            d = datetime.strptime(date_str, fmt).date()
+            # 연도가 없는 형식이면 올해로 설정
+            if "%Y" not in fmt:
+                d = d.replace(year=year)
+            return d
+        except ValueError:
+            continue
+    return None
+
+
+def is_holiday(target_date: date, holiday_data: List[Dict]) -> bool:
     """해당 날짜가 휴일인지 확인.
 
     방학 처리: '여름방학시작' 같은 사유가 있으면 '여름방학끝'을 찾아서
@@ -14,9 +37,8 @@ def is_holiday(target_date: date, holiday_data: list[dict]) -> bool:
     vacation_ranges = []
 
     for h in holiday_data:
-        try:
-            h_date = datetime.strptime(h["날짜"], "%Y-%m-%d").date()
-        except ValueError:
+        h_date = _parse_date(h["날짜"])
+        if h_date is None:
             logger.warning("휴일 날짜 파싱 오류: %s", h["날짜"])
             continue
 
@@ -43,12 +65,9 @@ def is_holiday(target_date: date, holiday_data: list[dict]) -> bool:
     return False
 
 
-def _find_vacation_end(prefix: str, holiday_data: list[dict]) -> date | None:
+def _find_vacation_end(prefix: str, holiday_data: List[Dict]) -> Optional[date]:
     """방학끝 날짜를 찾아 반환."""
     for h in holiday_data:
         if prefix + "끝" == h["사유"].replace(" ", ""):
-            try:
-                return datetime.strptime(h["날짜"], "%Y-%m-%d").date()
-            except ValueError:
-                return None
+            return _parse_date(h["날짜"])
     return None

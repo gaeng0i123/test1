@@ -1,7 +1,10 @@
+from __future__ import annotations
+
 import logging
 from datetime import date, datetime, timedelta
+from typing import Dict, List, Optional
 
-from telegram import Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 import sheets
@@ -25,21 +28,21 @@ def _resolve_date(date_text: str) -> date:
     return datetime.strptime(date_text, "%Y-%m-%d").date()
 
 
-def _get_child_chat_id(children: list[dict], name: str) -> int | None:
+def _get_child_chat_id(children: List[Dict], name: str) -> Optional[int]:
     for c in children:
         if c["name"] == name:
             return c["chat_id"]
     return None
 
 
-def _get_child_name_by_chat_id(children: list[dict], chat_id: int) -> str | None:
+def _get_child_name_by_chat_id(children: List[Dict], chat_id: int) -> Optional[str]:
     for c in children:
         if c["chat_id"] == chat_id:
             return c["name"]
     return None
 
 
-def _get_parent_chat_id() -> int | None:
+def _get_parent_chat_id() -> Optional[int]:
     try:
         settings = sheets.get_settings()
         return int(settings.get("부모_텔레그램_chat_id", 0))
@@ -57,6 +60,8 @@ def _is_parent(chat_id: int) -> bool:
 
 async def handle_done(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/done [과목] - 자녀가 숙제 완료 체크."""
+    if not update.message:
+        return
     chat_id = update.effective_chat.id
     children = sheets.get_children()
     child_name = _get_child_name_by_chat_id(children, chat_id)
@@ -75,9 +80,100 @@ async def handle_done(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     success = sheets.mark_homework_done(child_name, today, subject)
 
     if success:
+        sheets.advance_workbook_page(child_name, subject)
         await update.message.reply_text(build_done_response(child_name, subject))
     else:
         await update.message.reply_text(f"'{subject}' 숙제를 찾을 수 없어요. 과목명을 확인해주세요.")
+
+
+# ── 자녀: 숙제 완료 버튼 콜백 ──────────────────────────────
+
+
+async def handle_done_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """인라인 버튼 클릭 시 숙제 완료 처리."""
+    query = update.callback_query
+    if not query:
+        return
+    await query.answer()
+
+    # callback_data 형식: "done:자녀명:과목"
+    data = query.data
+    if not data or not data.startswith("done:"):
+        return
+
+    parts = data.split(":", 2)
+    if len(parts) < 3:
+        return
+
+    child_name = parts[1]
+    subject = parts[2]
+    today = date.today()
+
+    success = sheets.mark_homework_done(child_name, today, subject)
+    if success:
+        # 문제집 진도 자동 진행 (현재페이지 += 1회양)
+        sheets.advance_workbook_page(child_name, subject)
+
+        await query.edit_message_text(
+            text=query.message.text.replace(
+                f"⬜ {subject}", f"✅ {subject}"
+            ),
+            reply_markup=_rebuild_homework_buttons(child_name, today)
+        )
+        # 부모에게 알림
+        parent_id = _get_parent_chat_id()
+        if parent_id:
+            from telegram_bot import send_message
+            await send_message(parent_id, f"✅ {child_name}이(가) {subject} 숙제를 완료했어요!")
+    else:
+        await query.answer(f"'{subject}' 숙제를 찾을 수 없어요.", show_alert=True)
+
+
+def _rebuild_homework_buttons(child_name: str, target_date: date) -> InlineKeyboardMarkup:
+    """미완료 숙제만 버튼으로 다시 구성."""
+    homework = sheets.get_homework(child_name, target_date)
+    buttons = []
+    for hw in homework:
+        if hw["완료여부"] != "O":
+            buttons.append([InlineKeyboardButton(
+                text=f"✅ {hw['과목']} 완료!",
+                callback_data=f"done:{child_name}:{hw['과목']}"
+            )])
+    return InlineKeyboardMarkup(buttons)
+
+
+# ── 자녀: 학원 탑승완료 버튼 콜백 ─────────────────────────────
+
+
+async def handle_ride_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """학원 탑승완료 버튼 클릭 시 처리."""
+    query = update.callback_query
+    if not query:
+        return
+    await query.answer("탑승 확인! 👍")
+
+    data = query.data
+    if not data or not data.startswith("ride:"):
+        return
+
+    parts = data.split(":", 2)
+    if len(parts) < 3:
+        return
+
+    child_name = parts[1]
+    academy_name = parts[2]
+    now = datetime.now().strftime("%H:%M")
+
+    # 버튼을 "탑승완료" 텍스트로 교체
+    await query.edit_message_text(
+        text=query.message.text + f"\n\n🚌 {now} 탑승완료! ✅"
+    )
+
+    # 부모에게 알림
+    parent_id = _get_parent_chat_id()
+    if parent_id:
+        from telegram_bot import send_message
+        await send_message(parent_id, f"🚌 {child_name}이(가) {academy_name} 탑승완료! ({now})")
 
 
 # ── 부모 명령어: /add ────────────────────────────────────────
@@ -85,6 +181,8 @@ async def handle_done(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 async def handle_add(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/add [자녀명] [날짜] [과목] [내용] [페이지] - 숙제 추가."""
+    if not update.message:
+        return
     chat_id = update.effective_chat.id
     if not _is_parent(chat_id):
         await update.message.reply_text("부모 계정만 사용 가능합니다.")
@@ -121,6 +219,8 @@ async def handle_add(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 async def handle_today(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/today [자녀명] - 오늘 일정 조회."""
+    if not update.message:
+        return
     chat_id = update.effective_chat.id
     if not _is_parent(chat_id):
         await update.message.reply_text("부모 계정만 사용 가능합니다.")
@@ -148,6 +248,8 @@ async def handle_today(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 async def handle_send(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/send [자녀명] [메시지] - 자녀에게 즉시 메시지 전송."""
+    if not update.message:
+        return
     chat_id = update.effective_chat.id
     if not _is_parent(chat_id):
         await update.message.reply_text("부모 계정만 사용 가능합니다.")
@@ -180,6 +282,8 @@ async def handle_send(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 async def handle_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/status - 오늘 숙제 완료 현황."""
+    if not update.message:
+        return
     chat_id = update.effective_chat.id
     if not _is_parent(chat_id):
         await update.message.reply_text("부모 계정만 사용 가능합니다.")

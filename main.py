@@ -9,15 +9,16 @@ from datetime import date
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-from telegram.ext import ApplicationBuilder, CommandHandler
+from telegram import InlineKeyboardButton
+from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler
 
 import sheets
-from commands import handle_done, handle_add, handle_today, handle_send, handle_status
+from commands import handle_done, handle_done_callback, handle_ride_callback, handle_add, handle_today, handle_send, handle_status
 from config import TELEGRAM_BOT_TOKEN
 from message_builder import build_morning_summary
-from scheduler import send_morning_summary, check_academy_reminders, send_homework_reminder
+from scheduler import send_morning_summary, check_academy_reminders, send_homework_reminder, send_child_homework_reminder, _homework_buttons
 from stats import generate_weekly_report
-from telegram_bot import send_message, notify_parent
+from telegram_bot import send_message, send_message_with_buttons, notify_parent
 
 logging.basicConfig(
     level=logging.INFO,
@@ -42,7 +43,12 @@ async def run_test() -> None:
     """테스트: 모든 자녀에게 즉시 아침 요약 메시지 발송."""
     logger.info("테스트 모드: 메시지 발송 시작")
 
+    # 문제집 진도 계산
+    sheets.calculate_and_update_workbooks()
+
     children = sheets.get_children()
+    settings = sheets.get_settings()
+    parent_chat_id = int(settings.get("부모_텔레그램_chat_id", 0))
     today = date.today()
 
     for child in children:
@@ -51,17 +57,29 @@ async def run_test() -> None:
         academies = sheets.get_academy_schedule(name, today.weekday())
         homework = sheets.get_homework(name, today)
 
+        # 페이지가 비어있는 숙제에 문제집 진도 자동 채우기
+        for hw in homework:
+            if not hw["페이지"]:
+                page = sheets.get_today_page_assignment(name, hw["과목"])
+                if page:
+                    hw["페이지"] = page
+
         msg = build_morning_summary(name, today, academies, homework)
         if msg:
-            success = await send_message(chat_id, msg)
+            buttons = _homework_buttons(name, homework)
+            if buttons:
+                success = await send_message_with_buttons(chat_id, msg, buttons)
+            else:
+                success = await send_message(chat_id, msg)
             status = "성공" if success else "실패"
             logger.info("%s (chat_id=%s): %s", name, chat_id, status)
+            # 부모에게도 같은 메시지 전달
+            if parent_chat_id and parent_chat_id != chat_id:
+                await send_message(parent_chat_id, f"[{name}] {msg}")
         else:
             logger.info("%s: 오늘 일정 없음", name)
 
-    # 부모에게도 테스트 알림
-    settings = sheets.get_settings()
-    parent_chat_id = int(settings.get("부모_텔레그램_chat_id", 0))
+    # 부모에게도 테스트 완료 알림
     if parent_chat_id:
         await send_message(parent_chat_id, "✅ 테스트 발송 완료!")
 
@@ -94,6 +112,8 @@ def main() -> None:
     app.add_handler(CommandHandler("today", handle_today))
     app.add_handler(CommandHandler("send", handle_send))
     app.add_handler(CommandHandler("status", handle_status))
+    app.add_handler(CallbackQueryHandler(handle_done_callback, pattern=r"^done:"))
+    app.add_handler(CallbackQueryHandler(handle_ride_callback, pattern=r"^ride:"))
 
     # APScheduler 설정
     ap_scheduler = AsyncIOScheduler(timezone=timezone)
@@ -112,12 +132,30 @@ def main() -> None:
         id="academy_reminder",
     )
 
-    # ③ 저녁 숙제 알림
-    ap_scheduler.add_job(
-        send_homework_reminder,
-        CronTrigger(hour=int(homework_h), minute=int(homework_m)),
-        id="homework_reminder",
-    )
+    # ③ 숙제 알림: 자녀별 알림시간 시트가 있으면 개별 스케줄, 없으면 글로벌 시간
+    reminder_times = sheets.get_reminder_times()
+    if reminder_times:
+        for rt in reminder_times:
+            child_name = rt["자녀명"]
+            days = rt["요일"]
+            h, m = rt["시"], rt["분"]
+            # 요일을 cron 형식으로 변환 (0=월 → cron 0=mon)
+            cron_days = ",".join(["mon", "tue", "wed", "thu", "fri", "sat", "sun"][d] for d in days)
+            job_id = f"homework_{child_name}_{h:02d}{m:02d}_{cron_days}"
+            ap_scheduler.add_job(
+                send_child_homework_reminder,
+                CronTrigger(hour=h, minute=m, day_of_week=cron_days),
+                args=[child_name],
+                id=job_id,
+            )
+            logger.info("자녀별 숙제 알림 등록: %s → %02d:%02d (%s)", child_name, h, m, cron_days)
+    else:
+        # 알림시간 시트가 없으면 기존 글로벌 시간 사용
+        ap_scheduler.add_job(
+            send_homework_reminder,
+            CronTrigger(hour=int(homework_h), minute=int(homework_m)),
+            id="homework_reminder",
+        )
 
     # ④ 주간 통계 (매주 일요일 20:00)
     ap_scheduler.add_job(
@@ -126,8 +164,11 @@ def main() -> None:
         id="weekly_report",
     )
 
-    ap_scheduler.start()
-    logger.info("봇 시작! (아침: %s, 숙제: %s, 시간대: %s)", morning_time, homework_time, timezone)
+    async def post_init(application):
+        ap_scheduler.start()
+        logger.info("봇 시작! (아침: %s, 숙제: %s, 시간대: %s)", morning_time, homework_time, timezone)
+
+    app.post_init = post_init
 
     # 텔레그램 봇 polling 시작 (blocking)
     app.run_polling()
