@@ -10,6 +10,7 @@ from message_builder import (
     build_morning_summary,
     build_academy_reminder,
     build_homework_reminder,
+    build_one_time_schedule_reminder,
 )
 from telegram_bot import send_message, send_message_with_buttons, notify_parent
 
@@ -62,6 +63,9 @@ def _reset_recurring_homework_done() -> None:
 async def send_morning_summary() -> None:
     """매일 아침: 오늘의 학원+숙제 요약 메시지 발송."""
     try:
+        # 1회성 스케줄 사전 알림 체크
+        await check_one_time_schedule_reminders()
+
         # 알림주기 숙제 완료여부 리셋 (매일 새로 시작)
         _reset_recurring_homework_done()
 
@@ -190,6 +194,25 @@ async def send_homework_reminder() -> None:
                 await notify_parent(parent_chat_id, f"숙제 알림 발송 중 오류: {e}")
         except Exception:
             logger.exception("부모 알림 발송도 실패")
+
+
+async def check_one_time_schedule_reminders() -> None:
+    """매일 아침: 1회성 스케줄 사전 알림 체크 및 부모에게 발송."""
+    try:
+        settings = sheets.get_settings()
+        parent_chat_id = int(settings.get("부모_텔레그램_chat_id", 0))
+        if not parent_chat_id:
+            return
+
+        today = date.today()
+        schedules = sheets.get_one_time_schedule_reminders(today)
+        if schedules:
+            msg = build_one_time_schedule_reminder(schedules)
+            if msg:
+                await send_message(parent_chat_id, msg)
+                logger.info("1회성 스케줄 알림 발송: %d건", len(schedules))
+    except Exception as e:
+        logger.exception("1회성 스케줄 알림 체크 중 오류: %s", e)
 
 
 async def send_child_homework_reminder(child_name: str) -> None:
