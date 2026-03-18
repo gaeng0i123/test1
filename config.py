@@ -16,6 +16,7 @@ SHEET_HOLIDAYS = "휴일"
 SHEET_REMINDER_TIMES = "알림시간"
 SHEET_WORKBOOK = "문제집_진도"
 SHEET_ONE_TIME_SCHEDULE = "1회성_스케줄"
+SHEET_DONE = "숙제_완료"
 
 # 요일 매핑 (한글 → 숫자)
 DAY_MAP = {"월": 0, "화": 1, "수": 2, "목": 3, "금": 4, "토": 5, "일": 6}

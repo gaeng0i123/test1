@@ -19,6 +19,7 @@ from config import (
     SHEET_REMINDER_TIMES,
     SHEET_WORKBOOK,
     SHEET_ONE_TIME_SCHEDULE,
+    SHEET_DONE,
     DAY_MAP,
     DAY_NAMES,
 )
@@ -193,35 +194,61 @@ def _parse_hw_date(date_str: str) -> Optional[date]:
     return None
 
 
+def get_done_today(child_name: str, target_date: date) -> Dict[str, str]:
+    """숙제_완료 시트에서 오늘 완료한 과목 → 완료시간 딕셔너리 반환.
+
+    Returns:
+        {"수학": "14:30", "영어": "15:45", ...}
+    """
+    try:
+        ws = _get_spreadsheet().worksheet(SHEET_DONE)
+    except gspread.exceptions.WorksheetNotFound:
+        return {}
+
+    today_str = target_date.strftime("%Y.%m.%d")
+    rows = ws.get_all_records()
+    result = {}
+    for r in rows:
+        if str(r.get("날짜", "")).strip() != today_str:
+            continue
+        if str(r.get("자녀명", "")).strip() != child_name:
+            continue
+        subject = str(r.get("과목", "")).strip()
+        done_time = str(r.get("완료시간", "")).strip()
+        if subject:
+            result[subject] = done_time
+    return result
+
+
 def get_homework(child_name: str, target_date: date) -> List[Dict]:
     """특정 자녀의 특정 날짜 숙제 목록 반환.
 
-    알림주기 컬럼이 있으면 요일 기반 필터링도 수행:
-      - 알림주기가 비어있으면 → 날짜로 매칭 (기존 방식)
+    알림주기 컬럼이 있으면 요일 기반 필터링:
+      - 알림주기가 비어있으면 → 날짜로 매칭 (1회성)
       - 알림주기가 "매일", "월,수,금" 등이면 → 해당 요일에만 포함
 
+    완료여부는 숙제_완료 시트 기준으로 판단.
+
     Returns:
-        [{"과목": str, "내용": str, "페이지": str, "완료여부": str, "row_index": int}, ...]
+        [{"과목": str, "내용": str, "페이지": str, "완료여부": str, "완료시간": str, "row_index": int}, ...]
     """
     ws = _get_spreadsheet().worksheet(SHEET_HOMEWORK)
     rows = ws.get_all_records()
     today_weekday = target_date.weekday()
+    done_map = get_done_today(child_name, target_date)
     result = []
-    for idx, r in enumerate(rows, start=2):  # 헤더가 1행
+    for idx, r in enumerate(rows, start=2):
         name = str(r.get("자녀명", "")).strip()
         if name != child_name:
             continue
 
-        # 알림주기 컬럼 확인 (없을 수도 있음)
         schedule_str = str(r.get("알림주기", "")).strip()
         day_list = _parse_day_schedule(schedule_str)
 
         if day_list is not None:
-            # 알림주기가 설정됨 → 요일 기반 매칭
             if today_weekday not in day_list:
                 continue
         else:
-            # 알림주기 없음 → 기존 날짜 기반 매칭
             hw_date_raw = str(r.get("날짜", "")).strip()
             hw_date = _parse_hw_date(hw_date_raw)
             if hw_date != target_date:
@@ -229,19 +256,14 @@ def get_homework(child_name: str, target_date: date) -> List[Dict]:
                     logger.warning("숙제 날짜 파싱 실패: '%s'", hw_date_raw)
                 continue
 
-        done_raw = str(r.get("완료여부", "")).strip()
-        # 알림주기 있는 반복 숙제: 완료여부가 오늘 날짜인 경우만 완료로 인식
-        if day_list is not None:
-            today_str = target_date.strftime("%Y.%m.%d")
-            done_value = "O" if done_raw == today_str else ""
-        else:
-            done_value = done_raw
-
+        subject = str(r.get("과목", "")).strip()
+        done_time = done_map.get(subject, "")
         result.append({
-            "과목": str(r.get("과목", "")).strip(),
+            "과목": subject,
             "내용": str(r.get("내용", "")).strip(),
             "페이지": str(r.get("페이지", "")).strip(),
-            "완료여부": done_value,
+            "완료여부": "O" if done_time else "",
+            "완료시간": done_time,
             "row_index": idx,
         })
     return result
@@ -253,42 +275,49 @@ def get_incomplete_homework(child_name: str, target_date: date) -> List[Dict]:
 
 
 def mark_homework_done(child_name: str, target_date: date, subject: str) -> bool:
-    """특정 과목 숙제를 완료 처리. 성공 시 True 반환."""
-    ws = _get_spreadsheet().worksheet(SHEET_HOMEWORK)
-    rows = ws.get_all_records()
-    today_weekday = target_date.weekday()
+    """특정 과목 숙제를 숙제_완료 시트에 기록. 성공 시 True 반환."""
+    # 해당 숙제가 오늘 목록에 있는지 확인
+    homework_list = get_homework(child_name, target_date)
+    target_hw = next((hw for hw in homework_list if hw["과목"] == subject), None)
+    if target_hw is None:
+        return False
 
-    # 완료여부 컬럼 인덱스 찾기
-    headers = ws.row_values(1)
-    done_col = None
-    for i, h in enumerate(headers, start=1):
-        if h.strip() == "완료여부":
-            done_col = i
-            break
-    if done_col is None:
-        done_col = 6  # 기본값
+    # 이미 완료된 경우 중복 기록 방지
+    if target_hw["완료여부"] == "O":
+        return True
 
-    for idx, r in enumerate(rows, start=2):
-        name = str(r.get("자녀명", "")).strip()
-        hw_subject = str(r.get("과목", "")).strip()
-        if name != child_name or hw_subject != subject:
-            continue
+    # 숙제_완료 시트에 기록
+    try:
+        ws = _get_spreadsheet().worksheet(SHEET_DONE)
+    except gspread.exceptions.WorksheetNotFound:
+        logger.warning("'%s' 시트가 없습니다. 먼저 시트를 생성하세요.", SHEET_DONE)
+        return False
 
-        # 알림주기 확인
-        schedule_str = str(r.get("알림주기", "")).strip()
-        day_list = _parse_day_schedule(schedule_str)
+    done_time = datetime.now().strftime("%H:%M")
+    ws.append_row([
+        target_date.strftime("%Y.%m.%d"),
+        child_name,
+        subject,
+        done_time,
+    ])
+    logger.info("숙제 완료 기록: %s %s %s %s", target_date, child_name, subject, done_time)
 
-        if day_list is not None:
-            if today_weekday in day_list:
-                # 반복 숙제: 완료여부에 오늘 날짜 저장 (날짜 비교로 자동 리셋)
-                ws.update_cell(idx, done_col, target_date.strftime("%Y.%m.%d"))
-                return True
-        else:
-            hw_date = _parse_hw_date(str(r.get("날짜", "")))
-            if hw_date == target_date:
-                ws.update_cell(idx, done_col, "O")
-                return True
-    return False
+    # 문제집 진도 자동 진행
+    advance_workbook_page(child_name, subject)
+    return True
+
+
+def get_status_today(child_name: str, target_date: date) -> Dict:
+    """오늘 숙제 현황 반환.
+
+    Returns:
+        {"total": int, "done": int, "details": [{"과목": str, "완료여부": str, "완료시간": str}, ...]}
+    """
+    homework = get_homework(child_name, target_date)
+    total = len(homework)
+    done = sum(1 for hw in homework if hw["완료여부"] == "O")
+    details = [{"과목": hw["과목"], "완료여부": hw["완료여부"], "완료시간": hw["완료시간"]} for hw in homework]
+    return {"total": total, "done": done, "details": details}
 
 
 def add_homework(child_name: str, target_date: date, subject: str, content: str, page: str, schedule: str = "") -> None:
