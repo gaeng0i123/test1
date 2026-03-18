@@ -319,8 +319,11 @@ async def handle_status_refresh(update: Update, context: ContextTypes.DEFAULT_TY
         msg = await _send_status(chat_id, context)
         await query.edit_message_text(msg, reply_markup=_build_status_keyboard())
     except Exception as e:
-        logger.exception("handle_status_refresh 오류: %s", e)
-        await query.edit_message_text(f"❌ 오류 발생: {e}")
+        if "Message is not modified" in str(e):
+            await query.answer("이미 최신 상태예요!", show_alert=False)
+        else:
+            logger.exception("handle_status_refresh 오류: %s", e)
+            await query.edit_message_text(f"❌ 오류 발생: {e}")
 
 
 # ── 부모 명령어: /menu ────────────────────────────────────────
