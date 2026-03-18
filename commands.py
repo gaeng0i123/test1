@@ -314,9 +314,13 @@ async def handle_status_refresh(update: Update, context: ContextTypes.DEFAULT_TY
         return
     await query.answer("새로고침 중...")
 
-    chat_id = update.effective_chat.id
-    msg = await _send_status(chat_id, context)
-    await query.edit_message_text(msg, reply_markup=_build_status_keyboard())
+    try:
+        chat_id = update.effective_chat.id
+        msg = await _send_status(chat_id, context)
+        await query.edit_message_text(msg, reply_markup=_build_status_keyboard())
+    except Exception as e:
+        logger.exception("handle_status_refresh 오류: %s", e)
+        await query.edit_message_text(f"❌ 오류 발생: {e}")
 
 
 # ── 부모 명령어: /menu ────────────────────────────────────────
@@ -346,33 +350,36 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
     data = query.data
 
-    if data == "status:refresh":
-        await query.answer("현황 조회 중...")
-        msg = await _send_status(update.effective_chat.id, context)
-        await query.edit_message_text(msg, reply_markup=_build_status_keyboard())
+    try:
+        if data == "menu:today_all":
+            await query.answer()
+            children = sheets.get_children()
+            today = date.today()
+            lines = []
+            for child in children:
+                name = child["name"]
+                academies = sheets.get_academy_schedule(name, today.weekday())
+                homework = sheets.get_homework(name, today)
+                msg = build_morning_summary(name, today, academies, homework)
+                if msg:
+                    lines.append(msg)
+            result = "\n\n---\n\n".join(lines) if lines else "오늘 일정이 없습니다."
+            keyboard = InlineKeyboardMarkup([[
+                InlineKeyboardButton("◀ 메뉴로", callback_data="menu:back")
+            ]])
+            await query.edit_message_text(result, reply_markup=keyboard)
 
-    elif data == "menu:today_all":
-        await query.answer()
-        children = sheets.get_children()
-        today = date.today()
-        lines = []
-        for child in children:
-            name = child["name"]
-            academies = sheets.get_academy_schedule(name, today.weekday())
-            homework = sheets.get_homework(name, today)
-            msg = build_morning_summary(name, today, academies, homework)
-            if msg:
-                lines.append(msg)
-        result = "\n\n---\n\n".join(lines) if lines else "오늘 일정이 없습니다."
-        keyboard = InlineKeyboardMarkup([[
-            InlineKeyboardButton("◀ 메뉴로", callback_data="menu:back")
-        ]])
-        await query.edit_message_text(result, reply_markup=keyboard)
+        elif data == "menu:back":
+            await query.answer()
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("📊 현황조회", callback_data="status:refresh")],
+                [InlineKeyboardButton("📅 오늘 일정 조회", callback_data="menu:today_all")],
+            ])
+            await query.edit_message_text("📋 부모 메뉴", reply_markup=keyboard)
 
-    elif data == "menu:back":
-        await query.answer()
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📊 현황조회", callback_data="status:refresh")],
-            [InlineKeyboardButton("📅 오늘 일정 조회", callback_data="menu:today_all")],
-        ])
-        await query.edit_message_text("📋 부모 메뉴", reply_markup=keyboard)
+    except Exception as e:
+        logger.exception("handle_menu_callback 오류: %s", e)
+        try:
+            await query.edit_message_text(f"❌ 오류 발생: {e}")
+        except Exception:
+            pass
