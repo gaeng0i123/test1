@@ -629,11 +629,11 @@ def get_holidays() -> List[Dict]:
 def get_one_time_schedule_reminders(target_date: date) -> List[Dict]:
     """1회성_스케줄 시트에서 target_date에 발송해야 할 알림 목록 반환.
 
-    시트 컬럼: 날짜 | 시작시간 | 행위명 | 종료시간 | 알림주기
+    시트 컬럼: 대상 | 날짜 | 시작시간 | 행위명 | 종료시간 | 알림주기
     알림주기 예: "1,3,7"  → 이벤트 1일 전, 3일 전, 7일 전에 각각 알림 발송
 
     Returns:
-        [{"날짜": date, "시작시간": str, "행위명": str, "종료시간": str, "days_before": int}, ...]
+        [{"대상": str, "날짜": date, "시작시간": str, "행위명": str, "종료시간": str, "days_before": int}, ...]
     """
     import re as _re2
     try:
@@ -645,6 +645,7 @@ def get_one_time_schedule_reminders(target_date: date) -> List[Dict]:
     rows = ws.get_all_records()
     result = []
     for r in rows:
+        target_name = str(r.get("대상", "")).strip()
         date_str = str(r.get("날짜", "")).strip()
         start_time = str(r.get("시작시간", "")).strip()
         event_name = str(r.get("행위명", "")).strip()
@@ -666,10 +667,15 @@ def get_one_time_schedule_reminders(target_date: date) -> List[Dict]:
             if m:
                 days_before_list.append(int(m.group(1)))
 
+        # 당일(D-day) 알림: 0이 포함되어 있거나 알림주기와 무관하게 당일이면 포함
+        if 0 not in days_before_list:
+            days_before_list.append(0)
+
         for days_before in days_before_list:
             notify_date = event_date - timedelta(days=days_before)
             if notify_date == target_date:
                 result.append({
+                    "대상": target_name,
                     "날짜": event_date,
                     "시작시간": start_time,
                     "행위명": event_name,

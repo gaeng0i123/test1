@@ -89,6 +89,8 @@ def build_one_time_schedule_reminder(schedules: List[Dict]) -> Optional[str]:
     for s in schedules:
         event_date = s["날짜"]
         days_before = s["days_before"]
+        target = s.get("대상", "")
+        target_prefix = f"[{target}] " if target else ""
         time_range = ""
         if s["시작시간"]:
             time_range = s["시작시간"]
@@ -96,8 +98,9 @@ def build_one_time_schedule_reminder(schedules: List[Dict]) -> Optional[str]:
                 time_range += f"~{s['종료시간']}"
         date_str = event_date.strftime("%Y.%m.%d")
         time_part = f" ({time_range})" if time_range else ""
-        lines.append(f"  📌 {s['행위명']}")
+        d_day = "D-Day!" if days_before == 0 else f"D-{days_before}"
+        lines.append(f"  📌 {target_prefix}{s['행위명']}")
         lines.append(f"     📆 {date_str}{time_part}")
-        lines.append(f"     ⏰ D-{days_before}")
+        lines.append(f"     ⏰ {d_day}")
         lines.append("")
     return "\n".join(lines).rstrip()

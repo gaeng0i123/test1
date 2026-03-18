@@ -197,7 +197,7 @@ async def send_homework_reminder() -> None:
 
 
 async def check_one_time_schedule_reminders() -> None:
-    """매일 아침: 1회성 스케줄 사전 알림 체크 및 부모에게 발송."""
+    """매일 아침: 1회성 스케줄 사전 알림 체크. 대상별로 발송."""
     try:
         settings = sheets.get_settings()
         parent_chat_id = int(settings.get("부모_텔레그램_chat_id", 0))
@@ -206,11 +206,32 @@ async def check_one_time_schedule_reminders() -> None:
 
         today = date.today()
         schedules = sheets.get_one_time_schedule_reminders(today)
-        if schedules:
-            msg = build_one_time_schedule_reminder(schedules)
-            if msg:
+        if not schedules:
+            return
+
+        # 대상별로 그룹핑
+        children = {c["name"]: c["chat_id"] for c in sheets.get_children()}
+        by_target: dict[str, list] = {}
+        for s in schedules:
+            target = s["대상"]
+            by_target.setdefault(target, []).append(s)
+
+        for target, items in by_target.items():
+            msg = build_one_time_schedule_reminder(items)
+            if not msg:
+                continue
+
+            # 대상이 자녀목록에 있으면 해당 자녀 + 부모에게, 없으면 부모에게만
+            chat_id = children.get(target)
+            if chat_id:
+                await send_message(chat_id, msg)
+                if parent_chat_id != chat_id:
+                    await send_message(parent_chat_id, f"[{target}] {msg}")
+            else:
+                # 대상이 비어있거나 자녀목록에 없으면 부모에게만
                 await send_message(parent_chat_id, msg)
-                logger.info("1회성 스케줄 알림 발송: %d건", len(schedules))
+
+        logger.info("1회성 스케줄 알림 발송: %d건", len(schedules))
     except Exception as e:
         logger.exception("1회성 스케줄 알림 체크 중 오류: %s", e)
 
