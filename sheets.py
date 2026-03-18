@@ -229,11 +229,19 @@ def get_homework(child_name: str, target_date: date) -> List[Dict]:
                     logger.warning("숙제 날짜 파싱 실패: '%s'", hw_date_raw)
                 continue
 
+        done_raw = str(r.get("완료여부", "")).strip()
+        # 알림주기 있는 반복 숙제: 완료여부가 오늘 날짜인 경우만 완료로 인식
+        if day_list is not None:
+            today_str = target_date.strftime("%Y.%m.%d")
+            done_value = "O" if done_raw == today_str else ""
+        else:
+            done_value = done_raw
+
         result.append({
             "과목": str(r.get("과목", "")).strip(),
             "내용": str(r.get("내용", "")).strip(),
             "페이지": str(r.get("페이지", "")).strip(),
-            "완료여부": str(r.get("완료여부", "")).strip(),
+            "완료여부": done_value,
             "row_index": idx,
         })
     return result
@@ -272,7 +280,8 @@ def mark_homework_done(child_name: str, target_date: date, subject: str) -> bool
 
         if day_list is not None:
             if today_weekday in day_list:
-                ws.update_cell(idx, done_col, "O")
+                # 반복 숙제: 완료여부에 오늘 날짜 저장 (날짜 비교로 자동 리셋)
+                ws.update_cell(idx, done_col, target_date.strftime("%Y.%m.%d"))
                 return True
         else:
             hw_date = _parse_hw_date(str(r.get("날짜", "")))

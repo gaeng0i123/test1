@@ -66,9 +66,6 @@ async def send_morning_summary() -> None:
         # 1회성 스케줄 사전 알림 체크
         await check_one_time_schedule_reminders()
 
-        # 알림주기 숙제 완료여부 리셋 (매일 새로 시작)
-        _reset_recurring_homework_done()
-
         # 문제집 진도 계산 & 시트 업데이트
         sheets.calculate_and_update_workbooks()
 
