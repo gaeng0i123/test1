@@ -13,7 +13,12 @@ from telegram import InlineKeyboardButton
 from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler
 
 import sheets
-from commands import handle_done, handle_done_callback, handle_ride_callback, handle_add, handle_today, handle_send, handle_status
+from commands import (
+    handle_done, handle_done_callback, handle_ride_callback,
+    handle_add, handle_today, handle_send,
+    handle_status, handle_status_refresh,
+    handle_menu, handle_menu_callback,
+)
 from config import TELEGRAM_BOT_TOKEN
 from message_builder import build_morning_summary
 from scheduler import send_morning_summary, check_academy_reminders, send_homework_reminder, send_child_homework_reminder, check_one_time_schedule_reminders, _homework_buttons
@@ -112,8 +117,11 @@ def main() -> None:
     app.add_handler(CommandHandler("today", handle_today))
     app.add_handler(CommandHandler("send", handle_send))
     app.add_handler(CommandHandler("status", handle_status))
+    app.add_handler(CommandHandler("menu", handle_menu))
     app.add_handler(CallbackQueryHandler(handle_done_callback, pattern=r"^done:"))
     app.add_handler(CallbackQueryHandler(handle_ride_callback, pattern=r"^ride:"))
+    app.add_handler(CallbackQueryHandler(handle_status_refresh, pattern=r"^status:refresh$"))
+    app.add_handler(CallbackQueryHandler(handle_menu_callback, pattern=r"^menu:"))
 
     # APScheduler 설정
     ap_scheduler = AsyncIOScheduler(timezone=timezone)

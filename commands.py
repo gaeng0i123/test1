@@ -11,6 +11,7 @@ import sheets
 from message_builder import (
     build_morning_summary,
     build_done_response,
+    build_status_message,
 )
 
 logger = logging.getLogger(__name__)
@@ -80,7 +81,6 @@ async def handle_done(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     success = sheets.mark_homework_done(child_name, today, subject)
 
     if success:
-        sheets.advance_workbook_page(child_name, subject)
         await update.message.reply_text(build_done_response(child_name, subject))
     else:
         await update.message.reply_text(f"'{subject}' 숙제를 찾을 수 없어요. 과목명을 확인해주세요.")
@@ -111,9 +111,6 @@ async def handle_done_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
     success = sheets.mark_homework_done(child_name, today, subject)
     if success:
-        # 문제집 진도 자동 진행 (현재페이지 += 1회양)
-        sheets.advance_workbook_page(child_name, subject)
-
         await query.edit_message_text(
             text=query.message.text.replace(
                 f"⬜ {subject}", f"✅ {subject}"
@@ -280,8 +277,25 @@ async def handle_send(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 # ── 부모 명령어: /status ─────────────────────────────────────
 
 
+def _build_status_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("🔄 새로고침", callback_data="status:refresh")
+    ]])
+
+
+async def _send_status(chat_id: int, context) -> str:
+    """현황 메시지 생성 (공통 로직)."""
+    children = sheets.get_children()
+    today = date.today()
+    child_statuses = []
+    for child in children:
+        status = sheets.get_status_today(child["name"], today)
+        child_statuses.append({"name": child["name"], **status})
+    return build_status_message(today, child_statuses)
+
+
 async def handle_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/status - 오늘 숙제 완료 현황."""
+    """/status - 오늘 숙제 완료 현황 (새로고침 버튼 포함)."""
     if not update.message:
         return
     chat_id = update.effective_chat.id
@@ -289,23 +303,83 @@ async def handle_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await update.message.reply_text("부모 계정만 사용 가능합니다.")
         return
 
-    children = sheets.get_children()
-    today = date.today()
-    lines = [f"📋 오늘({today.month}/{today.day}) 숙제 현황", ""]
+    msg = await _send_status(chat_id, context)
+    await update.message.reply_text(msg, reply_markup=_build_status_keyboard())
 
-    for child in children:
-        name = child["name"]
-        homework = sheets.get_homework(name, today)
-        if not homework:
-            lines.append(f"👤 {name}: 오늘 숙제 없음")
-        else:
-            done = sum(1 for hw in homework if hw["완료여부"] == "O")
-            total = len(homework)
-            lines.append(f"👤 {name}: {done}/{total} 완료")
-            for hw in homework:
-                status = "✅" if hw["완료여부"] == "O" else "⬜"
-                page = f" {hw['페이지']}" if hw["페이지"] else ""
-                lines.append(f"  {status} {hw['과목']}: {hw['내용']}{page}")
-        lines.append("")
 
-    await update.message.reply_text("\n".join(lines))
+async def handle_status_refresh(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """현황 새로고침 버튼 콜백."""
+    query = update.callback_query
+    if not query:
+        return
+    await query.answer("새로고침 중...")
+
+    try:
+        chat_id = update.effective_chat.id
+        msg = await _send_status(chat_id, context)
+        await query.edit_message_text(msg, reply_markup=_build_status_keyboard())
+    except Exception as e:
+        logger.exception("handle_status_refresh 오류: %s", e)
+        await query.edit_message_text(f"❌ 오류 발생: {e}")
+
+
+# ── 부모 명령어: /menu ────────────────────────────────────────
+
+
+async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/menu - 부모 메뉴 (인라인 버튼)."""
+    if not update.message:
+        return
+    chat_id = update.effective_chat.id
+    if not _is_parent(chat_id):
+        await update.message.reply_text("부모 계정만 사용 가능합니다.")
+        return
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📊 현황조회", callback_data="status:refresh")],
+        [InlineKeyboardButton("📅 오늘 일정 조회", callback_data="menu:today_all")],
+    ])
+    await update.message.reply_text("📋 부모 메뉴", reply_markup=keyboard)
+
+
+async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """부모 메뉴 버튼 콜백."""
+    query = update.callback_query
+    if not query:
+        return
+
+    data = query.data
+
+    try:
+        if data == "menu:today_all":
+            await query.answer()
+            children = sheets.get_children()
+            today = date.today()
+            lines = []
+            for child in children:
+                name = child["name"]
+                academies = sheets.get_academy_schedule(name, today.weekday())
+                homework = sheets.get_homework(name, today)
+                msg = build_morning_summary(name, today, academies, homework)
+                if msg:
+                    lines.append(msg)
+            result = "\n\n---\n\n".join(lines) if lines else "오늘 일정이 없습니다."
+            keyboard = InlineKeyboardMarkup([[
+                InlineKeyboardButton("◀ 메뉴로", callback_data="menu:back")
+            ]])
+            await query.edit_message_text(result, reply_markup=keyboard)
+
+        elif data == "menu:back":
+            await query.answer()
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("📊 현황조회", callback_data="status:refresh")],
+                [InlineKeyboardButton("📅 오늘 일정 조회", callback_data="menu:today_all")],
+            ])
+            await query.edit_message_text("📋 부모 메뉴", reply_markup=keyboard)
+
+    except Exception as e:
+        logger.exception("handle_menu_callback 오류: %s", e)
+        try:
+            await query.edit_message_text(f"❌ 오류 발생: {e}")
+        except Exception:
+            pass

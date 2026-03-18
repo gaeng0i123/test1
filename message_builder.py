@@ -104,3 +104,33 @@ def build_one_time_schedule_reminder(schedules: List[Dict]) -> Optional[str]:
         lines.append(f"     ⏰ {d_day}")
         lines.append("")
     return "\n".join(lines).rstrip()
+
+
+def build_status_message(today: date, child_statuses: List[Dict]) -> str:
+    """오늘 숙제 현황 메시지 (부모용 수시 조회).
+
+    child_statuses: [{"name": str, "total": int, "done": int, "details": [...]}, ...]
+    """
+    from config import DAY_NAMES
+    day_name = DAY_NAMES[today.weekday()]
+    lines = [f"📊 오늘({today.month}/{today.day} {day_name}요일) 숙제 현황", ""]
+
+    for child in child_statuses:
+        name = child["name"]
+        total = child["total"]
+        done = child["done"]
+        details = child["details"]
+
+        if total == 0:
+            lines.append(f"👤 {name}: 오늘 숙제 없음")
+        else:
+            pct = int(done / total * 100)
+            lines.append(f"👤 {name}  {done}/{total} ({pct}%)")
+            for d in details:
+                if d["완료여부"] == "O":
+                    lines.append(f"  ✅ {d['과목']} ({d['완료시간']})")
+                else:
+                    lines.append(f"  ⬜ {d['과목']}")
+        lines.append("")
+
+    return "\n".join(lines).rstrip()
