@@ -18,6 +18,7 @@ from config import (
     SHEET_HOLIDAYS,
     SHEET_REMINDER_TIMES,
     SHEET_WORKBOOK,
+    SHEET_ONE_TIME_SCHEDULE,
     DAY_MAP,
     DAY_NAMES,
 )
@@ -620,3 +621,67 @@ def get_holidays() -> List[Dict]:
         {"날짜": str(r.get("날짜", "")).strip(), "사유": str(r.get("사유", "")).strip()}
         for r in rows
     ]
+
+
+# ── 1회성 스케줄 알림 ──────────────────────────────────────
+
+
+def get_one_time_schedule_reminders(target_date: date) -> List[Dict]:
+    """1회성_스케줄 시트에서 target_date에 발송해야 할 알림 목록 반환.
+
+    시트 컬럼: 대상 | 날짜 | 시작시간 | 행위명 | 종료시간 | 알림주기
+    알림주기 예: "1,3,7"  → 이벤트 1일 전, 3일 전, 7일 전에 각각 알림 발송
+
+    Returns:
+        [{"대상": str, "날짜": date, "시작시간": str, "행위명": str, "종료시간": str, "days_before": int}, ...]
+    """
+    import re as _re2
+    try:
+        ws = _get_spreadsheet().worksheet(SHEET_ONE_TIME_SCHEDULE)
+    except gspread.exceptions.WorksheetNotFound:
+        logger.info("'%s' 시트가 없습니다. 1회성 스케줄 미사용.", SHEET_ONE_TIME_SCHEDULE)
+        return []
+
+    rows = ws.get_all_records()
+    result = []
+    for r in rows:
+        target_name = str(r.get("대상", "")).strip()
+        date_str = str(r.get("날짜", "")).strip()
+        start_time = str(r.get("시작시간", "")).strip()
+        event_name = str(r.get("행위명", "")).strip()
+        end_time = str(r.get("종료시간", "")).strip()
+        reminder_str = str(r.get("알림주기", "")).strip()
+
+        if not date_str or not event_name or not reminder_str:
+            continue
+
+        event_date = _parse_hw_date(date_str)
+        if event_date is None:
+            logger.warning("1회성 스케줄 날짜 파싱 실패: '%s'", date_str)
+            continue
+
+        # 알림주기 파싱: "1,3,7" 또는 "1일전,3일전,7일전" → [1, 3, 7]
+        days_before_list = []
+        for part in reminder_str.split(","):
+            m = _re2.match(r"(\d+)", part.strip())
+            if m:
+                days_before_list.append(int(m.group(1)))
+
+        # 당일(D-day) 알림: 0이 포함되어 있거나 알림주기와 무관하게 당일이면 포함
+        if 0 not in days_before_list:
+            days_before_list.append(0)
+
+        for days_before in days_before_list:
+            notify_date = event_date - timedelta(days=days_before)
+            if notify_date == target_date:
+                result.append({
+                    "대상": target_name,
+                    "날짜": event_date,
+                    "시작시간": start_time,
+                    "행위명": event_name,
+                    "종료시간": end_time,
+                    "days_before": days_before,
+                })
+                break  # 동일 이벤트 중복 알림 방지
+
+    return result

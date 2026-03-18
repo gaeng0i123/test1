@@ -78,3 +78,29 @@ def build_full_weekly_report(week_label: str, child_reports: List[str]) -> str:
     lines = [f"📊 이번 주 숙제 리포트 ({week_label})", ""]
     lines.extend(child_reports)
     return "\n".join(lines)
+
+
+def build_one_time_schedule_reminder(schedules: List[Dict]) -> Optional[str]:
+    """1회성 스케줄 사전 알림 메시지 생성."""
+    if not schedules:
+        return None
+
+    lines = ["📅 다가오는 일정 알림!", ""]
+    for s in schedules:
+        event_date = s["날짜"]
+        days_before = s["days_before"]
+        target = s.get("대상", "")
+        target_prefix = f"[{target}] " if target else ""
+        time_range = ""
+        if s["시작시간"]:
+            time_range = s["시작시간"]
+            if s["종료시간"]:
+                time_range += f"~{s['종료시간']}"
+        date_str = event_date.strftime("%Y.%m.%d")
+        time_part = f" ({time_range})" if time_range else ""
+        d_day = "D-Day!" if days_before == 0 else f"D-{days_before}"
+        lines.append(f"  📌 {target_prefix}{s['행위명']}")
+        lines.append(f"     📆 {date_str}{time_part}")
+        lines.append(f"     ⏰ {d_day}")
+        lines.append("")
+    return "\n".join(lines).rstrip()

@@ -16,7 +16,7 @@ import sheets
 from commands import handle_done, handle_done_callback, handle_ride_callback, handle_add, handle_today, handle_send, handle_status
 from config import TELEGRAM_BOT_TOKEN
 from message_builder import build_morning_summary
-from scheduler import send_morning_summary, check_academy_reminders, send_homework_reminder, send_child_homework_reminder, _homework_buttons
+from scheduler import send_morning_summary, check_academy_reminders, send_homework_reminder, send_child_homework_reminder, check_one_time_schedule_reminders, _homework_buttons
 from stats import generate_weekly_report
 from telegram_bot import send_message, send_message_with_buttons, notify_parent
 
