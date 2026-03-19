@@ -722,3 +722,73 @@ def get_one_time_schedule_reminders(target_date: date) -> List[Dict]:
                 break  # 동일 이벤트 중복 알림 방지
 
     return result
+
+
+def get_one_time_schedule_minute_reminders(now: datetime) -> List[Dict]:
+    """1회성_스케줄 시트에서 now 기준 분전 알림 대상 반환.
+
+    시트 컬럼 '분전_알림' 예: "30,60,90" → 시작시간 30/60/90분 전에 알림 발송
+
+    Returns:
+        [{"대상": str, "날짜": date, "시작시간": str, "행위명": str,
+          "종료시간": str, "minutes_before": int}, ...]
+    """
+    import re as _re3
+    try:
+        ws = _get_spreadsheet().worksheet(SHEET_ONE_TIME_SCHEDULE)
+    except gspread.exceptions.WorksheetNotFound:
+        return []
+
+    rows = ws.get_all_records()
+    today = now.date() if hasattr(now, 'date') else now
+    result = []
+    for r in rows:
+        target_name = str(r.get("대상", "")).strip()
+        date_str = str(r.get("날짜", "")).strip()
+        start_time = str(r.get("시작시간", "")).strip()
+        event_name = str(r.get("행위명", "")).strip()
+        end_time = str(r.get("종료시간", "")).strip()
+        minute_reminder_str = str(r.get("분전_알림", "")).strip()
+
+        if not date_str or not event_name or not start_time or not minute_reminder_str:
+            continue
+
+        event_date = _parse_hw_date(date_str)
+        if event_date is None or event_date != today:
+            continue
+
+        # 분전_알림 파싱: "30,60,90" 또는 "30분,60분,90분" → [30, 60, 90]
+        minutes_before_list = []
+        for part in minute_reminder_str.split(","):
+            m = _re3.match(r"(\d+)", part.strip())
+            if m:
+                minutes_before_list.append(int(m.group(1)))
+
+        if not minutes_before_list:
+            continue
+
+        # 시작시간 파싱 (HH:MM 또는 HH:MM:SS)
+        try:
+            time_str = start_time[:5]  # "14:00:00" → "14:00"
+            event_dt = datetime.strptime(time_str, "%H:%M").replace(
+                year=now.year, month=now.month, day=now.day
+            )
+        except ValueError:
+            logger.warning("1회성 스케줄 시작시간 파싱 실패: '%s'", start_time)
+            continue
+
+        for mins in minutes_before_list:
+            notify_dt = event_dt - timedelta(minutes=mins)
+            diff = abs((now - notify_dt).total_seconds()) / 60
+            if diff < 1:  # ±1분 범위
+                result.append({
+                    "대상": target_name,
+                    "날짜": event_date,
+                    "시작시간": start_time,
+                    "행위명": event_name,
+                    "종료시간": end_time,
+                    "minutes_before": mins,
+                })
+                break  # 동일 이벤트 중복 알림 방지
+
+    return result
