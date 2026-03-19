@@ -106,6 +106,31 @@ def build_one_time_schedule_reminder(schedules: List[Dict]) -> Optional[str]:
     return "\n".join(lines).rstrip()
 
 
+def build_one_time_schedule_minute_reminder(schedules: List[Dict]) -> Optional[str]:
+    """1회성 스케줄 분전 알림 메시지 생성."""
+    if not schedules:
+        return None
+
+    lines = ["⏰ 일정 알림!", ""]
+    for s in schedules:
+        event_date = s["날짜"]
+        minutes_before = s["minutes_before"]
+        target = s.get("대상", "")
+        target_prefix = f"[{target}] " if target else ""
+        time_range = ""
+        if s["시작시간"]:
+            time_range = s["시작시간"][:5]  # HH:MM
+            if s["종료시간"]:
+                time_range += f"~{s['종료시간'][:5]}"
+        date_str = event_date.strftime("%Y.%m.%d")
+        time_part = f" {time_range}" if time_range else ""
+        lines.append(f"  📌 {target_prefix}{s['행위명']}")
+        lines.append(f"     📆 {date_str}{time_part}")
+        lines.append(f"     ⏰ {minutes_before}분 후 시작!")
+        lines.append("")
+    return "\n".join(lines).rstrip()
+
+
 def build_status_message(today: date, child_statuses: List[Dict]) -> str:
     """오늘 숙제 현황 메시지 (부모용 수시 조회).
 

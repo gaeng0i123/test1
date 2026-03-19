@@ -21,7 +21,7 @@ from commands import (
 )
 from config import TELEGRAM_BOT_TOKEN
 from message_builder import build_morning_summary
-from scheduler import send_morning_summary, check_academy_reminders, send_homework_reminder, send_child_homework_reminder, check_one_time_schedule_reminders, _homework_buttons
+from scheduler import send_morning_summary, check_academy_reminders, send_homework_reminder, send_child_homework_reminder, check_one_time_schedule_reminders, check_one_time_schedule_minute_reminders, _homework_buttons
 from stats import generate_weekly_report
 from telegram_bot import send_message, send_message_with_buttons, notify_parent
 
@@ -151,6 +151,13 @@ def main() -> None:
         check_academy_reminders,
         CronTrigger(minute="*"),
         id="academy_reminder",
+    )
+
+    # ②-1 1회성 스케줄 분전 알림 (매 분 체크)
+    ap_scheduler.add_job(
+        check_one_time_schedule_minute_reminders,
+        CronTrigger(minute="*"),
+        id="one_time_schedule_minute_reminder",
     )
 
     # ③ 숙제 알림: 자녀별 알림시간 시트가 있으면 개별 스케줄, 없으면 글로벌 시간

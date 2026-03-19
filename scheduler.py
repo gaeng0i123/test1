@@ -11,6 +11,7 @@ from message_builder import (
     build_academy_reminder,
     build_homework_reminder,
     build_one_time_schedule_reminder,
+    build_one_time_schedule_minute_reminder,
 )
 from telegram_bot import send_message, send_message_with_buttons, notify_parent
 
@@ -232,6 +233,43 @@ async def check_one_time_schedule_reminders() -> None:
         logger.info("1회성 스케줄 알림 발송: %d건", len(schedules))
     except Exception as e:
         logger.exception("1회성 스케줄 알림 체크 중 오류: %s", e)
+
+
+async def check_one_time_schedule_minute_reminders() -> None:
+    """매 분 실행: 1회성 스케줄 시작시간 N분 전이면 알림 발송."""
+    try:
+        settings = sheets.get_settings()
+        parent_chat_id = int(settings.get("부모_텔레그램_chat_id", 0))
+        if not parent_chat_id:
+            return
+
+        now = datetime.now()
+        schedules = sheets.get_one_time_schedule_minute_reminders(now)
+        if not schedules:
+            return
+
+        children = {c["name"]: c["chat_id"] for c in sheets.get_children()}
+        by_target: dict[str, list] = {}
+        for s in schedules:
+            target = s["대상"]
+            by_target.setdefault(target, []).append(s)
+
+        for target, items in by_target.items():
+            msg = build_one_time_schedule_minute_reminder(items)
+            if not msg:
+                continue
+
+            chat_id = children.get(target)
+            if chat_id:
+                await send_message(chat_id, msg)
+                if parent_chat_id != chat_id:
+                    await send_message(parent_chat_id, f"[{target}] {msg}")
+            else:
+                await send_message(parent_chat_id, msg)
+
+        logger.info("1회성 스케줄 분전 알림 발송: %d건", len(schedules))
+    except Exception as e:
+        logger.exception("1회성 스케줄 분전 알림 체크 중 오류: %s", e)
 
 
 async def send_child_homework_reminder(child_name: str) -> None:
