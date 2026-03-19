@@ -49,9 +49,10 @@ def _get_spreadsheet() -> gspread.Spreadsheet:
 
 
 def get_children() -> List[Dict]:
-    """자녀목록 시트에서 {이름, chat_id} 리스트 반환.
+    """자녀목록 시트에서 {이름, chat_id, test_account} 리스트 반환.
 
-    텔레그램_chat_id에 'test'라고 적으면 부모 chat_id로 대체.
+    텔레그램_chat_id에 숫자가 아닌 값(test, test1, test2 등)을 적으면
+    부모 chat_id로 대체하고 test_account 필드에 원래 값을 저장.
     """
     ws = _get_spreadsheet().worksheet(SHEET_CHILDREN)
     rows = ws.get_all_records()
@@ -71,17 +72,15 @@ def get_children() -> List[Dict]:
             chat_id_raw = str(r.get("텔레그램_chat_id", "")).strip().lower()
             if not name or not chat_id_raw:
                 continue
-            # "test"라고 적으면 부모 chat_id 사용
-            if chat_id_raw == "test":
+            # 숫자로 변환 불가 = 테스트 계정 (test, test1, test2 등)
+            try:
+                chat_id_int = int(float(chat_id_raw))
+                children.append({"name": name, "chat_id": chat_id_int, "test_account": None})
+            except ValueError:
                 if parent_chat_id:
-                    children.append({"name": name, "chat_id": parent_chat_id})
+                    children.append({"name": name, "chat_id": parent_chat_id, "test_account": chat_id_raw})
                 else:
-                    logger.warning("test 모드인데 부모 chat_id가 설정에 없습니다")
-                continue
-            children.append({
-                "name": name,
-                "chat_id": int(float(chat_id_raw)),
-            })
+                    logger.warning("테스트 계정(%s)인데 부모 chat_id가 설정에 없습니다", chat_id_raw)
         except (ValueError, KeyError) as e:
             logger.warning("자녀목록 파싱 오류, 행 스킵: %s (오류: %s)", r, e)
     return children
