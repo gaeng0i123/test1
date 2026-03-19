@@ -132,7 +132,8 @@ async def check_academy_reminders() -> None:
 
             for academy in academies:
                 try:
-                    dep_time = datetime.strptime(academy["출발시간"], "%H:%M").replace(
+                    time_str = academy["출발시간"][:5]  # "17:40:00" → "17:40"
+                    dep_time = datetime.strptime(time_str, "%H:%M").replace(
                         year=now.year, month=now.month, day=now.day
                     )
                     diff_minutes = (dep_time - now).total_seconds() / 60

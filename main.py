@@ -44,14 +44,24 @@ async def send_weekly_report() -> None:
         logger.exception("주간 리포트 발송 오류: %s", e)
 
 
-async def run_test() -> None:
-    """테스트: 모든 자녀에게 즉시 아침 요약 메시지 발송."""
-    logger.info("테스트 모드: 메시지 발송 시작")
+async def run_test(test_account: str = None) -> None:
+    """테스트: 아침 요약 메시지 즉시 발송.
+
+    test_account가 지정되면 해당 테스트 계정에 연결된 자녀만 발송.
+    예: test_account="test1" → 시트에서 텔레그램_chat_id가 "test1"인 자녀만.
+    """
+    logger.info("테스트 모드: 메시지 발송 시작 (계정: %s)", test_account or "전체")
 
     # 문제집 진도 계산
     sheets.calculate_and_update_workbooks()
 
     children = sheets.get_children()
+    if test_account:
+        children = [c for c in children if c.get("test_account") == test_account]
+        if not children:
+            logger.error("'%s' 계정에 연결된 자녀를 찾을 수 없습니다.", test_account)
+            return
+
     settings = sheets.get_settings()
     parent_chat_id = int(settings.get("부모_텔레그램_chat_id", 0))
     today = date.today()
@@ -93,11 +103,14 @@ async def run_test() -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="자녀 학원/숙제 알림 봇")
-    parser.add_argument("--test", action="store_true", help="즉시 테스트 메시지 발송")
+    parser.add_argument("--test", nargs="?", const="all", default=None,
+                        metavar="ACCOUNT",
+                        help="즉시 테스트 메시지 발송. 계정 미지정 시 전체, 지정 시 해당 계정만 (예: --test test1)")
     args = parser.parse_args()
 
-    if args.test:
-        asyncio.run(run_test())
+    if args.test is not None:
+        account = None if args.test == "all" else args.test
+        asyncio.run(run_test(account))
         return
 
     # 설정 읽기

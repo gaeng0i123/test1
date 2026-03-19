@@ -38,7 +38,7 @@ async def send_message_with_buttons(chat_id: int, text: str, buttons: List[List[
     markup = InlineKeyboardMarkup(buttons)
     for attempt in range(retries):
         try:
-            await bot.send_message(chat_id=chat_id, text=text, reply_markup=markup)
+            await bot.send_message(chat_id=chat_id, text=text, reply_markup=markup, parse_mode="HTML")
             return True
         except TelegramError as e:
             logger.error("버튼 메시지 발송 실패 (시도 %d/%d): %s", attempt + 1, retries, e)

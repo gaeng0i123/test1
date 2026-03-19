@@ -94,36 +94,56 @@ async def handle_done_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     query = update.callback_query
     if not query:
         return
-    await query.answer()
 
     # callback_data 형식: "done:자녀명:과목"
     data = query.data
     if not data or not data.startswith("done:"):
+        try:
+            await query.answer()
+        except Exception:
+            pass
         return
 
     parts = data.split(":", 2)
     if len(parts) < 3:
+        try:
+            await query.answer()
+        except Exception:
+            pass
         return
 
     child_name = parts[1]
     subject = parts[2]
     today = date.today()
 
-    success = sheets.mark_homework_done(child_name, today, subject)
-    if success:
-        await query.edit_message_text(
-            text=query.message.text.replace(
-                f"⬜ {subject}", f"✅ {subject}"
-            ),
-            reply_markup=_rebuild_homework_buttons(child_name, today)
-        )
-        # 부모에게 알림
-        parent_id = _get_parent_chat_id()
-        if parent_id:
-            from telegram_bot import send_message
-            await send_message(parent_id, f"✅ {child_name}이(가) {subject} 숙제를 완료했어요!")
-    else:
-        await query.answer(f"'{subject}' 숙제를 찾을 수 없어요.", show_alert=True)
+    try:
+        success = sheets.mark_homework_done(child_name, today, subject)
+        if success:
+            new_markup = _rebuild_homework_buttons(child_name, today)
+            try:
+                await query.edit_message_text(
+                    text=query.message.text.replace(
+                        f"⬜ {subject}", f"✅ {subject}"
+                    ),
+                    reply_markup=new_markup
+                )
+            except Exception as e:
+                if "Message is not modified" not in str(e):
+                    raise
+            await query.answer(f"✅ {subject} 완료!")
+            # 부모에게 알림
+            parent_id = _get_parent_chat_id()
+            if parent_id:
+                from telegram_bot import send_message
+                await send_message(parent_id, f"✅ {child_name}이(가) {subject} 숙제를 완료했어요!")
+        else:
+            await query.answer(f"'{subject}' 숙제를 찾을 수 없어요.", show_alert=True)
+    except Exception as e:
+        logger.exception("handle_done_callback 오류: %s", e)
+        try:
+            await query.answer("오류가 발생했어요.", show_alert=True)
+        except Exception:
+            pass
 
 
 def _rebuild_homework_buttons(child_name: str, target_date: date) -> InlineKeyboardMarkup:
@@ -147,24 +167,46 @@ async def handle_ride_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     query = update.callback_query
     if not query:
         return
-    await query.answer("탑승 확인! 👍")
 
     data = query.data
     if not data or not data.startswith("ride:"):
+        try:
+            await query.answer()
+        except Exception:
+            pass
         return
 
     parts = data.split(":", 2)
     if len(parts) < 3:
+        try:
+            await query.answer()
+        except Exception:
+            pass
         return
 
     child_name = parts[1]
     academy_name = parts[2]
     now = datetime.now().strftime("%H:%M")
 
-    # 버튼을 "탑승완료" 텍스트로 교체
-    await query.edit_message_text(
-        text=query.message.text + f"\n\n🚌 {now} 탑승완료! ✅"
-    )
+    try:
+        # 버튼을 "탑승완료" 텍스트로 교체
+        await query.edit_message_text(
+            text=query.message.text + f"\n\n🚌 {now} 탑승완료! ✅"
+        )
+        await query.answer("탑승 확인! 👍")
+    except Exception as e:
+        if "Message is not modified" in str(e):
+            try:
+                await query.answer("이미 탑승완료 처리됐어요!", show_alert=False)
+            except Exception:
+                pass
+        else:
+            logger.exception("handle_ride_callback 오류: %s", e)
+            try:
+                await query.answer("오류가 발생했어요.", show_alert=True)
+            except Exception:
+                pass
+        return
 
     # 부모에게 알림
     parent_id = _get_parent_chat_id()
@@ -312,18 +354,24 @@ async def handle_status_refresh(update: Update, context: ContextTypes.DEFAULT_TY
     query = update.callback_query
     if not query:
         return
-    await query.answer("새로고침 중...")
 
     try:
         chat_id = update.effective_chat.id
         msg = await _send_status(chat_id, context)
         await query.edit_message_text(msg, reply_markup=_build_status_keyboard())
+        await query.answer()
     except Exception as e:
         if "Message is not modified" in str(e):
-            await query.answer("이미 최신 상태예요!", show_alert=False)
+            try:
+                await query.answer("이미 최신 상태예요!", show_alert=False)
+            except Exception:
+                pass
         else:
             logger.exception("handle_status_refresh 오류: %s", e)
-            await query.edit_message_text(f"❌ 오류 발생: {e}")
+            try:
+                await query.answer("오류가 발생했어요.", show_alert=True)
+            except Exception:
+                pass
 
 
 # ── 부모 명령어: /menu ────────────────────────────────────────
